@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Genesis - Wide Items Update</title>
+    <title>Genesis - Hardcore Inflation</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #87CEEB; font-family: sans-serif; touch-action: none; user-select: none; }
         #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
@@ -78,10 +78,13 @@
         let atkSpeedMult = 1.0, shootTimer = 0, shootInterval = 900;
         let projectileCount = 1, projectileSize = 1.0;
         
+        // 난이도 변수
+        let enemySpawnTimer = 0;
+        let enemySpawnInterval = 2000;
+        
         let enemies = [], projectiles = [], enemyProjectiles = [];
         let items = [], dyingEnemies = [];
         let hpHearts = [], particles = [];
-        
         let isDragging = false, startX = 0, currentX = 0, moveDir = 0;
         const keys = {};
 
@@ -147,8 +150,6 @@
             const ratio = Math.max(0, current / max);
             bar.fg.scale.x = ratio; bar.fg.position.x = -(bar.fullWidth * (1 - ratio)) / 2;
         }
-        
-        // --- 텍스트 변경: Spd, Pow, Larg ---
         function updateStatsUI() {
             statsEl.innerHTML = `
                 <span class="stat-item" style="color:#00ffff">Spd: ${Math.round(atkSpeedMult*100)}%</span>
@@ -212,35 +213,61 @@
         window.addEventListener('touchmove', e => onMove(e.touches[0].clientX));
         window.addEventListener('touchend', onEnd);
 
-        // --- 아이템 변경: 네모나고 넓은 형태 ---
         function spawnItem(pos) {
             const rand = Math.random(); let type, color;
             if (rand < 0.33) { type = 'speed'; color = 0x00ffff; } 
             else if (rand < 0.66) { type = 'count'; color = 0xff0000; } 
             else { type = 'size'; color = 0xffff00; }
-
-            // 가로로 긴 박스 형태 (Width: 1.2, Height: 0.4, Depth: 0.4)
             const itemGeo = new THREE.BoxGeometry(1.2, 0.4, 0.4);
             const itemMat = new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.6 });
             const item = new THREE.Mesh(itemGeo, itemMat);
-            
-            item.position.set(pos.x, 0.5, pos.z); 
-            item.userData = { type: type };
+            item.position.set(pos.x, 0.5, pos.z); item.userData = { type: type };
             scene.add(item); items.push(item);
         }
 
+        // --- 🔥 핵심 변경: 가파른 난이도 상승 로직 ---
         function spawnEnemy() {
             if (!gameActive || !sharedModelRaw) return;
             const enemyGroup = new THREE.Group();
             const enemyModel = sharedModelRaw.clone();
             enemyModel.scale.set(0.35, 0.35, 0.35);
-            enemyModel.traverse(c => { if(c.isMesh) { c.material = c.material.clone(); c.material.color.set(0xff5555); }});
+            
+            // 1. 기본 체력 계산 (10점당 1씩 증가)
+            const baseHP = 1 + Math.floor(score / 10);
+            
+            // 2. 엘리트 확률 (30% 확률로 5배 체력)
+            const isElite = Math.random() < 0.3;
+            const finalHP = isElite ? baseHP * 5 : baseHP;
+            
+            // 3. 색상 결정 (강할수록 어둡거나 금색)
+            let enemyColor = 0xff5555; // 기본 빨강
+            if (isElite) {
+                if (score > 100) enemyColor = 0xffd700; // 초반 엘리트: 금색
+                else enemyColor = 0x111111; // 일반 엘리트: 검정
+            } else {
+                // 일반 적도 체력이 높으면 색 변화 (빨강 -> 보라 -> 검정 계열)
+                if (baseHP > 5) enemyColor = 0x800080;
+                if (baseHP > 10) enemyColor = 0x440044;
+            }
+
+            enemyModel.traverse(c => { 
+                if(c.isMesh) { 
+                    c.material = c.material.clone(); 
+                    c.material.color.set(enemyColor); 
+                }
+            });
             enemyGroup.add(enemyModel);
+            
             const hpBar = createHPBar(1.2, 0.15, 0xff0000); hpBar.group.position.set(0, 3.2, 0);
             enemyGroup.add(hpBar.group);
             enemyGroup.position.set((Math.random()-0.5)*(roadWidth-3), 0, playerGroup.position.z - 80);
             scene.add(enemyGroup);
-            enemies.push({ mesh: enemyGroup, hp: 1, maxHP: 1, hpBar: hpBar, lastShot: performance.now() + Math.random() * 2000 });
+            
+            enemies.push({ 
+                mesh: enemyGroup, 
+                hp: finalHP, maxHP: finalHP, 
+                hpBar: hpBar, lastShot: performance.now() + Math.random() * 2000 
+            });
         }
 
         function enemyShoot(enemyPos) {
@@ -279,15 +306,27 @@
             if (playerHP <= 0) location.reload();
             else {
                 document.getElementById('overlay').style.display = 'none'; gameActive = true;
-                atkSpeedMult = 1.0; projectileCount = 1; projectileSize = 1.0; shootInterval = 900; updateStatsUI();
+                atkSpeedMult = 1.0; projectileCount = 1; projectileSize = 1.0; shootInterval = 900; 
+                enemySpawnInterval = 2000;
+                updateStatsUI();
                 initHeartTrail();
-                if (!window.spawnerSet) { setInterval(spawnEnemy, 2000); window.spawnerSet = true; }
             }
         });
 
         function animate() {
             requestAnimationFrame(animate);
             if (gameActive) {
+                const now = performance.now();
+
+                // 🔥 난이도 스케일링: 점수당 50ms씩 감소 (매우 가파름)
+                // 40점만 되어도 0.25초마다 나옴 (최소 250ms)
+                enemySpawnInterval = Math.max(250, 2000 - (score * 50));
+
+                if (now - enemySpawnTimer > enemySpawnInterval) {
+                    spawnEnemy();
+                    enemySpawnTimer = now;
+                }
+
                 playerGroup.position.z -= 0.18; 
                 let finalMoveDir = moveDir;
                 if (keys['a'] || keys['arrowleft']) finalMoveDir = -1;
@@ -304,14 +343,14 @@
                     const targetX = playerGroup.position.x + xOffset; const targetZ = playerGroup.position.z + zOffset;
                     heart.position.x = THREE.MathUtils.lerp(heart.position.x, targetX, 0.1);
                     heart.position.z = THREE.MathUtils.lerp(heart.position.z, targetZ, 0.1);
-                    heart.position.y = 1.0 + Math.sin(performance.now() * 0.005 + i) * 0.15;
+                    heart.position.y = 1.0 + Math.sin(now * 0.005 + i) * 0.15;
                 });
 
-                if (performance.now() - shootTimer > shootInterval) { playerShoot(); shootTimer = performance.now(); }
+                if (now - shootTimer > shootInterval) { playerShoot(); shootTimer = now; }
 
                 enemies.forEach((e, idx) => {
                     e.mesh.position.z += 0.05; e.hpBar.group.quaternion.copy(camera.quaternion);
-                    if (performance.now() - e.lastShot > 3000) { enemyShoot(e.mesh.position); e.lastShot = performance.now(); }
+                    if (now - e.lastShot > 3000) { enemyShoot(e.mesh.position); e.lastShot = now; }
                     
                     if (playerGroup.position.distanceTo(e.mesh.position) < 1.5) {
                         takeDamage('hit'); scene.remove(e.hpBar.group); dyingEnemies.push({ mesh: e.mesh, timer: 0 }); enemies.splice(idx, 1);
@@ -356,7 +395,6 @@
 
                 items.forEach((item, i) => {
                     item.rotation.y += 0.05;
-                    // 가로로 길어졌으므로 획득 범위 판정을 조금 더 너그럽게
                     if (playerGroup.position.distanceTo(item.position) < 1.8) {
                         const type = item.userData.type;
                         if (type === 'speed') { atkSpeedMult += 0.1; shootInterval = 900 / atkSpeedMult; } 
