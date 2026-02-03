@@ -3,44 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Genesis - Fixed Start</title>
+    <title>Genesis - Compact Hearts</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; touch-action: none; user-select: none; }
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; font-family: sans-serif; touch-action: none; user-select: none; }
         #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
-        #hud {
-            position: absolute; top: 20px; width: 100%;
-            display: flex; justify-content: center; gap: 20px;
-            color: white; font-size: 20px; font-weight: bold;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        #hud { 
+            position: absolute; top: 20px; width: 100%; 
+            display: flex; flex-direction: column; align-items: center; gap: 10px;
+            color: white; font-weight: bold; 
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5); 
         }
-        #hp-display { color: #ff4444; }
-        #overlay {
-            position: absolute; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8);
-            display: flex; flex-direction: column; justify-content: center; align-items: center;
-            z-index: 10;
+        #score-display { font-size: 28px; color: #fff; }
+        #stats-display { font-size: 16px; display: flex; gap: 15px; background: rgba(0,0,0,0.3); padding: 5px 15px; border-radius: 20px;}
+        .stat-item { display: flex; align-items: center; gap: 5px; }
+        
+        #overlay { 
+            position: absolute; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.7); 
+            display: flex; flex-direction: column; justify-content: center; align-items: center; 
+            z-index: 10; 
         }
-        #msg { color: #ffcc00; font-size: 50px; margin-bottom: 30px; font-weight: bold; letter-spacing: 2px; }
-        button {
-            padding: 15px 50px; font-size: 20px; cursor: pointer;
-            background: #ffcc00; border: none; border-radius: 50px; font-weight: bold;
-            pointer-events: auto; transition: transform 0.1s;
+        #msg { color: #ffcc00; font-size: 50px; margin-bottom: 30px; font-weight: bold; letter-spacing: 2px; text-shadow: 3px 3px 0 #000; }
+        button { 
+            padding: 15px 50px; font-size: 20px; cursor: pointer; 
+            background: #ffcc00; border: 3px solid #fff; border-radius: 50px; font-weight: bold; color: #000;
+            pointer-events: auto; transition: transform 0.1s; box-shadow: 0 4px 0 #d4aa00;
         }
-        button:active { transform: scale(0.95); }
-        button:disabled { background: #555; cursor: default; }
-
-        /* 가상 패드 스타일 */
+        button:active { transform: scale(0.95); box-shadow: 0 2px 0 #d4aa00; top: 2px; position: relative;}
+        button:disabled { background: #888; border-color: #aaa; color: #ccc; box-shadow: none; cursor: default; }
+        
         #virtual-pad {
             position: absolute; width: 80px; height: 80px;
-            border: 2px solid rgba(255, 255, 255, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.5);
             border-radius: 50%;
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.2);
             display: none; transform: translate(-50%, -50%);
             pointer-events: none;
         }
         #pad-knob {
             position: absolute; top: 50%; left: 50%; width: 30px; height: 30px;
-            background: rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.8);
             border-radius: 50%; transform: translate(-50%, -50%);
         }
     </style>
@@ -53,7 +55,11 @@
     <div id="ui-container">
         <div id="hud">
             <div id="score-display">SCORE: 0</div>
-            <div id="hp-display">HP: 10</div>
+            <div id="stats-display">
+                <span class="stat-item" style="color:#00ffff">SPD: 100%</span>
+                <span class="stat-item" style="color:#ff5555">CNT: 1</span>
+                <span class="stat-item" style="color:#ffff00">SIZE: 100%</span>
+            </div>
         </div>
         <div id="virtual-pad"><div id="pad-knob"></div></div>
     </div>
@@ -65,88 +71,138 @@
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-        // --- 변수 선언 ---
-        let gameActive = false, score = 0, playerHP = 10, isInvincible = false;
+        let gameActive = false, score = 0, playerHP = 10;
+        const maxPlayerHP = 10;
+        let isInvincible = false;
+        
+        let atkSpeedMult = 1.0, shootTimer = 0, shootInterval = 900;
+        let projectileCount = 1, projectileSize = 1.0;
+        
         let enemies = [], projectiles = [], enemyProjectiles = [];
-        let shootTimer = 0, shootInterval = 900;
+        let items = [], dyingEnemies = [];
+        let hpHearts = [], particles = [];
         let isDragging = false, startX = 0, currentX = 0, moveDir = 0;
 
-        // --- 씬 설정 ---
+        const scoreEl = document.getElementById('score-display');
+        const statsEl = document.getElementById('stats-display');
+
+        const skyColor = 0x87CEEB;
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x87CEEB);
-        // 안개 추가 (원근감)
-        scene.fog = new THREE.Fog(0x87CEEB, 30, 150);
+        scene.background = new THREE.Color(skyColor);
+        scene.fog = new THREE.Fog(skyColor, 40, 160);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 1.2));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-        dirLight.position.set(10, 20, 10);
+        scene.add(new THREE.AmbientLight(0xffffff, 1.4));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(10, 30, 20);
         scene.add(dirLight);
 
-        // 도로
-        const roadWidth = 14;
-        const road = new THREE.Mesh(new THREE.PlaneGeometry(roadWidth, 2000), new THREE.MeshStandardMaterial({ color: 0x444444 }));
+        // --- 배경 설정 ---
+        const roadWidth = 16;
+        const roadMat = new THREE.MeshLambertMaterial({ color: 0xccaa66 }); 
+        const road = new THREE.Mesh(new THREE.PlaneGeometry(roadWidth, 2000), roadMat);
         road.rotation.x = -Math.PI / 2;
         scene.add(road);
 
-        // --- 모델 로드 ---
-        const playerGroup = new THREE.Group();
-        scene.add(playerGroup);
+        const grassMat = new THREE.MeshLambertMaterial({ color: 0x4caf50 });
+        const sideGroundGeo = new THREE.PlaneGeometry(600, 2000);
+        const leftGround = new THREE.Mesh(sideGroundGeo, grassMat);
+        leftGround.rotation.x = -Math.PI / 2; leftGround.position.set(-(300 + roadWidth/2), -0.05, 0);
+        scene.add(leftGround);
+        const rightGround = new THREE.Mesh(sideGroundGeo, grassMat);
+        rightGround.rotation.x = -Math.PI / 2; rightGround.position.set(300 + roadWidth/2, -0.05, 0);
+        scene.add(rightGround);
 
+        const treeCount = 800;
+        const treeGeo = new THREE.ConeGeometry(1.5, 4, 8);
+        const treeMat = new THREE.MeshLambertMaterial({ color: 0x2e7d32 });
+        const forest = new THREE.InstancedMesh(treeGeo, treeMat, treeCount);
+        const dummy = new THREE.Object3D();
+        for (let i = 0; i < treeCount; i++) {
+            const side = Math.random() > 0.5 ? 1 : -1;
+            const x = (roadWidth/2 + 3 + Math.random() * 50) * side;
+            const z = (Math.random() - 0.5) * 500;
+            const scale = 0.8 + Math.random() * 0.6;
+            dummy.position.set(x, 2 * scale, z);
+            dummy.scale.set(scale, scale, scale);
+            dummy.updateMatrix();
+            forest.setMatrixAt(i, dummy.matrix);
+        }
+        scene.add(forest);
+
+        function createHPBar(width, height, color) {
+            const group = new THREE.Group();
+            const bg = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+            const fg = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ color: color }));
+            fg.position.z = 0.01; group.add(bg, fg);
+            return { group, fg, fullWidth: width };
+        }
+        function updateHPBar(bar, current, max) {
+            const ratio = Math.max(0, current / max);
+            bar.fg.scale.x = ratio; bar.fg.position.x = -(bar.fullWidth * (1 - ratio)) / 2;
+        }
+        function updateStatsUI() {
+            statsEl.innerHTML = `
+                <span class="stat-item" style="color:#00ffff">SPD: ${Math.round(atkSpeedMult*100)}%</span>
+                <span class="stat-item" style="color:#ff5555">CNT: ${projectileCount}</span>
+                <span class="stat-item" style="color:#ffff00">SIZE: ${Math.round(projectileSize*100)}%</span>
+            `;
+        }
+
+        // --- 하트 설정 ---
+        const heartGeo = new THREE.SphereGeometry(0.3, 8, 8);
+        const heartMat = new THREE.MeshLambertMaterial({ color: 0xff0000, emissive: 0x550000 });
+        
+        function initHeartTrail() {
+            hpHearts.forEach(h => scene.remove(h)); 
+            hpHearts = [];
+            for(let i=0; i<maxPlayerHP; i++) {
+                const heart = new THREE.Mesh(heartGeo, heartMat);
+                // 초기 위치 (일단 플레이어 뒤쪽)
+                heart.position.set(0, 1, 5);
+                scene.add(heart); 
+                hpHearts.push(heart);
+            }
+        }
+
+        const particleGeo = new THREE.BoxGeometry(0.15, 0.15, 0.15);
+        function spawnExplosion(pos) {
+            for(let i=0; i<10; i++) {
+                const particle = new THREE.Mesh(particleGeo, heartMat);
+                particle.position.copy(pos);
+                particle.velocity = new THREE.Vector3((Math.random()-0.5)*0.3, (Math.random()*0.3), (Math.random()-0.5)*0.3);
+                particle.life = 1.0;
+                scene.add(particle); particles.push(particle);
+            }
+        }
+
+        const playerGroup = new THREE.Group(); scene.add(playerGroup);
         const loader = new GLTFLoader();
         let sharedModelRaw;
-
         loader.load('https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb', (gltf) => {
             sharedModelRaw = gltf.scene;
             const playerModel = sharedModelRaw.clone();
-            playerModel.scale.set(0.35, 0.35, 0.35);
-            playerModel.rotation.y = Math.PI;
+            playerModel.scale.set(0.35, 0.35, 0.35); playerModel.rotation.y = Math.PI;
             playerGroup.add(playerModel);
-
-            // 로딩 완료 후 버튼 활성화
-            const btn = document.getElementById('start-button');
-            btn.disabled = false;
-            btn.innerText = "게임 시작";
+            document.getElementById('start-button').disabled = false;
+            document.getElementById('start-button').innerText = "게임 시작";
         });
 
-        // --- 조작 시스템 (드래그 & 가상 패드) ---
-        const pad = document.getElementById('virtual-pad');
-        const knob = document.getElementById('pad-knob');
-
+        const pad = document.getElementById('virtual-pad'); const knob = document.getElementById('pad-knob');
         const onStart = (x, y) => {
-            if (!gameActive) return;
-            isDragging = true;
-            startX = x;
-            pad.style.display = 'block';
-            pad.style.left = x + 'px';
-            pad.style.top = y + 'px';
-            knob.style.left = '50%';
+            if (!gameActive) return; isDragging = true; startX = x;
+            pad.style.display = 'block'; pad.style.left = x + 'px'; pad.style.top = y + 'px'; knob.style.left = '50%';
         };
-
         const onMove = (x) => {
-            if (!isDragging) return;
-            currentX = x;
-            let diff = currentX - startX;
-            // 패드 노브 이동 범위 제한
-            let constrainedDiff = Math.max(-40, Math.min(40, diff));
-            knob.style.left = (50 + (constrainedDiff / 40) * 50) + '%';
-
-            // 이동 방향 결정 (데드존 5px)
-            if (diff > 5) moveDir = 1;
-            else if (diff < -5) moveDir = -1;
-            else moveDir = 0;
+            if (!isDragging) return; currentX = x; let diff = currentX - startX;
+            knob.style.left = (50 + (Math.max(-40, Math.min(40, diff)) / 40) * 50) + '%';
+            moveDir = diff > 5 ? 1 : (diff < -5 ? -1 : 0);
         };
-
-        const onEnd = () => {
-            isDragging = false;
-            moveDir = 0;
-            pad.style.display = 'none';
-        };
-
+        const onEnd = () => { isDragging = false; moveDir = 0; pad.style.display = 'none'; };
         window.addEventListener('mousedown', e => onStart(e.clientX, e.clientY));
         window.addEventListener('mousemove', e => onMove(e.clientX));
         window.addEventListener('mouseup', onEnd);
@@ -154,171 +210,175 @@
         window.addEventListener('touchmove', e => onMove(e.touches[0].clientX));
         window.addEventListener('touchend', onEnd);
 
-        // --- 게임 로직 ---
+        function spawnItem(pos) {
+            const rand = Math.random(); let type, color;
+            if (rand < 0.33) { type = 'speed'; color = 0x00ffff; } 
+            else if (rand < 0.66) { type = 'count'; color = 0xff0000; } 
+            else { type = 'size'; color = 0xffff00; }
+            const item = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.6 }));
+            item.position.set(pos.x, 0.5, pos.z); item.userData = { type: type };
+            scene.add(item); items.push(item);
+        }
+
         function spawnEnemy() {
             if (!gameActive || !sharedModelRaw) return;
             const enemyGroup = new THREE.Group();
             const enemyModel = sharedModelRaw.clone();
             enemyModel.scale.set(0.35, 0.35, 0.35);
-            // 적 색상 변경 (붉은색)
-            enemyModel.traverse(c => {
-                if(c.isMesh) {
-                    c.material = c.material.clone();
-                    c.material.color.set(0xff5555);
-                }
-            });
+            enemyModel.traverse(c => { if(c.isMesh) { c.material = c.material.clone(); c.material.color.set(0xff5555); }});
             enemyGroup.add(enemyModel);
-            // 플레이어 앞쪽 랜덤 위치 생성
-            enemyGroup.position.set((Math.random()-0.5)*(roadWidth-2), 0, playerGroup.position.z - 80);
+            const hpBar = createHPBar(1.2, 0.15, 0xff0000); hpBar.group.position.set(0, 3.2, 0);
+            enemyGroup.add(hpBar.group);
+            enemyGroup.position.set((Math.random()-0.5)*(roadWidth-3), 0, playerGroup.position.z - 80);
             scene.add(enemyGroup);
-
-            enemies.push({
-                mesh: enemyGroup,
-                lastShot: performance.now() + Math.random() * 2000 // 첫 발사 시간 랜덤
-            });
+            enemies.push({ mesh: enemyGroup, hp: 1, maxHP: 1, hpBar: hpBar, lastShot: performance.now() + Math.random() * 2000 });
         }
 
         function enemyShoot(enemyPos) {
             const ball = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff0000 }));
-            ball.position.set(enemyPos.x, 1.5, enemyPos.z);
-            scene.add(ball);
-            enemyProjectiles.push(ball);
+            ball.position.set(enemyPos.x, 1.5, enemyPos.z); scene.add(ball); enemyProjectiles.push(ball);
         }
 
-        function takeDamage(amt) {
-            if (isInvincible || !gameActive) return;
-            playerHP -= amt;
-            document.getElementById('hp-display').innerText = `HP: ${playerHP}`;
+        function playerShoot() {
+            const spread = 0.5; 
+            for (let i = 0; i < projectileCount; i++) {
+                const p = new THREE.Mesh(new THREE.SphereGeometry(0.25*projectileSize, 8, 8), new THREE.MeshStandardMaterial({ color: 0xffff00 }));
+                const offsetX = (i - (projectileCount - 1) / 2) * spread;
+                p.position.set(playerGroup.position.x + offsetX, 1, playerGroup.position.z);
+                scene.add(p); projectiles.push(p);
+            }
+        }
 
-            if (playerHP <= 0) {
+        function takeDamage(sourceType) {
+            if (!gameActive || playerHP <= 0) return;
+            if (sourceType === 'hit' && isInvincible) return;
+
+            playerHP--;
+            // 뒤에서부터 하트 제거
+            const lastHeart = hpHearts.pop();
+            if(lastHeart) { spawnExplosion(lastHeart.position); scene.remove(lastHeart); }
+
+            if (playerHP <= 0) { 
                 gameOver();
-            } else {
-                isInvincible = true;
-                // 깜빡임 효과
-                let blink = 0;
-                const timer = setInterval(() => {
-                    playerGroup.visible = !playerGroup.visible;
-                    if (++blink > 6) {
-                        clearInterval(timer);
-                        playerGroup.visible = true;
-                        isInvincible = false;
-                    }
-                }, 100);
+            } else if (sourceType === 'hit') {
+                isInvincible = true; let blink = 0;
+                const timer = setInterval(() => { playerGroup.visible = !playerGroup.visible; if (++blink > 6) { clearInterval(timer); playerGroup.visible = true; isInvincible = false; } }, 100);
             }
         }
 
         function gameOver() {
-            gameActive = false;
-            document.getElementById('msg').innerText = "GAME OVER";
-            document.getElementById('start-button').innerText = "다시 시작";
-            document.getElementById('overlay').style.display = 'flex';
+            gameActive = false; document.getElementById('msg').innerText = "GAME OVER"; document.getElementById('start-button').innerText = "다시 시작"; document.getElementById('overlay').style.display = 'flex';
         }
 
-        // --- 핵심 수정: 버튼 클릭 이벤트 ---
         document.getElementById('start-button').addEventListener('click', () => {
-            // 게임 오버 상태일 때만 리로드 (초기화)
-            if (playerHP <= 0) {
-                location.reload();
-            } else {
-                // 처음 시작일 때는 오버레이만 숨기고 게임 활성화
-                document.getElementById('overlay').style.display = 'none';
-                gameActive = true;
-                // 적 생성 시작 (중복 실행 방지)
-                if (!window.spawnerSet) {
-                    setInterval(spawnEnemy, 2000);
-                    window.spawnerSet = true;
-                }
+            if (playerHP <= 0) location.reload();
+            else {
+                document.getElementById('overlay').style.display = 'none'; gameActive = true;
+                atkSpeedMult = 1.0; projectileCount = 1; projectileSize = 1.0; shootInterval = 900; updateStatsUI();
+                initHeartTrail();
+                if (!window.spawnerSet) { setInterval(spawnEnemy, 2000); window.spawnerSet = true; }
             }
         });
 
-        // --- 메인 루프 ---
         function animate() {
             requestAnimationFrame(animate);
             if (gameActive) {
-                // 1. 플레이어 이동
-                playerGroup.position.z -= 0.18; // 전진
-                // 좌우 이동 (속도 절반 0.14)
+                playerGroup.position.z -= 0.18; 
                 if (moveDir !== 0) playerGroup.position.x += moveDir * 0.14;
-                playerGroup.position.x = Math.max(-6.3, Math.min(6.3, playerGroup.position.x));
+                playerGroup.position.x = Math.max(-7, Math.min(7, playerGroup.position.x));
 
-                // 2. 카메라 추적
                 camera.position.set(playerGroup.position.x * 0.5, 8, playerGroup.position.z + 10);
                 camera.lookAt(playerGroup.position.x, 0, playerGroup.position.z - 10);
 
-                // 3. 플레이어 자동 사격
-                if (performance.now() - shootTimer > shootInterval) {
-                    const p = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), new THREE.MeshStandardMaterial({ color: 0xffff00 }));
-                    p.position.set(playerGroup.position.x, 1, playerGroup.position.z);
-                    scene.add(p);
-                    projectiles.push(p);
-                    shootTimer = performance.now();
-                }
+                // --- 하트 배치 로직 수정 (2열 횡대) ---
+                hpHearts.forEach((heart, i) => {
+                    // 2줄로 배치 (한 줄에 5개씩)
+                    // row 0: 0,1,2,3,4 (앞줄)
+                    // row 1: 5,6,7,8,9 (뒷줄)
+                    const row = Math.floor(i / 5); 
+                    const col = i % 5;
+                    
+                    // X축: 중앙 정렬 (-2, -1, 0, 1, 2)
+                    const xOffset = (col - 2) * 0.6; 
+                    
+                    // Z축: 플레이어 등 뒤 + 줄 간격
+                    const zOffset = 2.5 + (row * 0.7);
 
-                // 4. 적군 로직
+                    const targetX = playerGroup.position.x + xOffset;
+                    const targetZ = playerGroup.position.z + zOffset;
+
+                    // 부드럽게 따라오기
+                    heart.position.x = THREE.MathUtils.lerp(heart.position.x, targetX, 0.1);
+                    heart.position.z = THREE.MathUtils.lerp(heart.position.z, targetZ, 0.1);
+                    
+                    // 둥실거림 (각자 조금씩 다르게)
+                    heart.position.y = 1.0 + Math.sin(performance.now() * 0.005 + i) * 0.15;
+                });
+
+                if (performance.now() - shootTimer > shootInterval) { playerShoot(); shootTimer = performance.now(); }
+
                 enemies.forEach((e, idx) => {
-                    e.mesh.position.z += 0.05; // 천천히 다가옴
-
-                    // 적 사격 (3초 간격)
-                    if (performance.now() - e.lastShot > 3000) {
-                        enemyShoot(e.mesh.position);
-                        e.lastShot = performance.now();
-                    }
-
-                    // 몸통 박치기
+                    e.mesh.position.z += 0.05; e.hpBar.group.quaternion.copy(camera.quaternion);
+                    if (performance.now() - e.lastShot > 3000) { enemyShoot(e.mesh.position); e.lastShot = performance.now(); }
+                    
                     if (playerGroup.position.distanceTo(e.mesh.position) < 1.5) {
-                        takeDamage(1);
-                        scene.remove(e.mesh);
-                        enemies.splice(idx, 1);
+                        takeDamage('hit'); scene.remove(e.hpBar.group); dyingEnemies.push({ mesh: e.mesh, timer: 0 }); enemies.splice(idx, 1);
                     }
-
-                    // 지나간 적 제거
-                    if (e.mesh.position.z > playerGroup.position.z + 10) {
-                        scene.remove(e.mesh);
-                        enemies.splice(idx, 1);
+                    else if (e.mesh.position.z > playerGroup.position.z + 10) {
+                        takeDamage('pass'); scene.remove(e.mesh); enemies.splice(idx, 1);
                     }
                 });
 
-                // 5. 아군 총알 이동 및 충돌
                 projectiles.forEach((p, i) => {
                     p.position.z -= 0.8;
-                    // 적과 충돌 체크
                     for (let ei = enemies.length - 1; ei >= 0; ei--) {
-                        const e = enemies[ei];
-                        if (p.position.distanceTo(e.mesh.position) < 1.5) {
-                            scene.remove(e.mesh); enemies.splice(ei, 1); // 적 제거
-                            scene.remove(p); projectiles.splice(i, 1);   // 총알 제거
-                            score++;
-                            document.getElementById('score-display').innerText = `SCORE: ${score}`;
-                            break; // 총알 하나당 적 하나
+                        const e = enemies[ei]; const hitDist = 1.2 * projectileSize; 
+                        if (p.position.distanceTo(e.mesh.position) < hitDist) {
+                            scene.remove(p); projectiles.splice(i, 1); e.hp -= 1; updateHPBar(e.hpBar, e.hp, e.maxHP);
+                            if (e.hp <= 0) {
+                                scene.remove(e.hpBar.group); dyingEnemies.push({ mesh: e.mesh, timer: 0 }); enemies.splice(ei, 1);
+                                score++; scoreEl.innerText = `SCORE: ${score}`;
+                                if (Math.random() < 0.2) spawnItem(e.mesh.position);
+                            }
+                            break;
                         }
                     }
-                    // 거리 벗어남 제거
-                    if (p.position.z < playerGroup.position.z - 100) {
-                        scene.remove(p); projectiles.splice(i, 1);
-                    }
+                    if (p && p.position.z < playerGroup.position.z - 100) { scene.remove(p); projectiles.splice(i, 1); }
                 });
 
-                // 6. 적군 총알(에너지볼) 이동 및 피격
                 enemyProjectiles.forEach((eb, i) => {
-                    eb.position.z += 0.4; // 플레이어 쪽으로 날아옴
-                    if (eb.position.distanceTo(playerGroup.position) < 1.5) {
-                        takeDamage(1);
-                        scene.remove(eb);
-                        enemyProjectiles.splice(i, 1);
-                    }
-                    if (eb.position.z > playerGroup.position.z + 10) {
-                        scene.remove(eb);
-                        enemyProjectiles.splice(i, 1);
-                    }
+                    eb.position.z += 0.4;
+                    if (eb.position.distanceTo(playerGroup.position) < 1.5) { takeDamage('hit'); scene.remove(eb); enemyProjectiles.splice(i, 1); }
+                    else if (eb.position.z > playerGroup.position.z + 10) { scene.remove(eb); enemyProjectiles.splice(i, 1); }
                 });
 
-                // 도로 무한 스크롤
-                road.position.z = playerGroup.position.z - 500;
+                dyingEnemies.forEach((de, i) => {
+                    de.timer += 0.05; de.mesh.rotation.x -= 0.1; de.mesh.position.y -= 0.02;
+                    if (de.timer > 1.5) { scene.remove(de.mesh); dyingEnemies.splice(i, 1); }
+                });
+
+                particles.forEach((p, i) => {
+                    p.position.add(p.velocity); p.life -= 0.05; p.scale.multiplyScalar(0.9);
+                    if(p.life <= 0) { scene.remove(p); particles.splice(i, 1); }
+                });
+
+                items.forEach((item, i) => {
+                    item.rotation.y += 0.05;
+                    if (playerGroup.position.distanceTo(item.position) < 1.5) {
+                        const type = item.userData.type;
+                        if (type === 'speed') { atkSpeedMult += 0.1; shootInterval = 900 / atkSpeedMult; } 
+                        else if (type === 'count') projectileCount += 1;
+                        else if (type === 'size') projectileSize += 0.2;
+                        updateStatsUI(); scene.remove(item); items.splice(i, 1);
+                    } else if (item.position.z > playerGroup.position.z + 10) { scene.remove(item); items.splice(i, 1); }
+                });
+
+                const offsetZ = playerGroup.position.z - 500;
+                road.position.z = offsetZ; leftGround.position.z = offsetZ; rightGround.position.z = offsetZ; forest.position.z = offsetZ;
             }
             renderer.render(scene, camera);
         }
 
-        // 창 크기 대응
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
