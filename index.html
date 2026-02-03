@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Genesis - Death Animation & Items</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        #ui-container {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; display: flex; flex-direction: column; align-items: center;
+        }
+        #hud {
+            margin-top: 20px; color: white; font-size: 24px; font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8); display: flex; gap: 30px;
+        }
+        #atk-speed-info { color: #00ffcc; font-size: 18px; }
+        #overlay {
+            position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.8);
+            display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 10;
+        }
+        #msg { color: #ffcc00; font-size: 60px; margin-bottom: 30px; font-weight: bold; letter-spacing: 5px; }
+        button {
+            padding: 15px 50px; font-size: 22px; cursor: pointer;
+            background: #ffcc00; border: none; border-radius: 50px; font-weight: bold;
+            pointer-events: auto;
+        }
+        button:disabled { background: #555; cursor: default; }
+    </style>
+</head>
+<body>
+    <div id="overlay">
+        <div id="msg">GENESIS</div>
+        <button id="start-button" disabled>로딩 중...</button>
+    </div>
+    <div id="ui-container">
+        <div id="hud">
+            <div id="score-display">SCORE: 0</div>
+            <div id="atk-speed-info">ATK SPEED: 100%</div>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // --- 게임 설정 ---
+        let gameActive = false;
+        let score = 0;
+        let playerHP = 10;
+        const maxPlayerHP = 10;
+        let isInvincible = false;
+
+        // 아이템 관련
+        let atkSpeedMult = 1.0;
+        let shootInterval = 900;
+        let shootTimer = 0;
+
+        let enemies = [];
+        let dyingEnemies = []; // 쓰러지는 연출 중인 적들
+        let projectiles = [];
+        let items = [];
+
+        const scoreElement = document.getElementById('score-display');
+        const atkSpeedElement = document.getElementById('atk-speed-info');
+        const overlay = document.getElementById('overlay');
+        const msg = document.getElementById('msg');
+        const startBtn = document.getElementById('start-button');
+
+        // --- Three.js 기초 ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.Fog(0x87CEEB, 30, 160);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(10, 20, 10);
+        scene.add(dirLight);
+
+        // --- 배경 ---
+        const roadWidth = 14;
+        const road = new THREE.Mesh(new THREE.PlaneGeometry(roadWidth, 2000), new THREE.MeshStandardMaterial({ color: 0x444444 }));
+        road.rotation.x = -Math.PI / 2;
+        scene.add(road);
+
+        const seaMat = new THREE.MeshStandardMaterial({ color: 0x005b96 });
+        const leftSea = new THREE.Mesh(new THREE.PlaneGeometry(600, 2000), seaMat);
+        leftSea.rotation.x = -Math.PI / 2;
+        leftSea.position.set(-(300 + roadWidth/2), -0.5, 0);
+        scene.add(leftSea);
+
+        const rightSea = new THREE.Mesh(new THREE.PlaneGeometry(600, 2000), seaMat);
+        rightSea.rotation.x = -Math.PI / 2;
+        rightSea.position.set(300 + roadWidth/2, -0.5, 0);
+        scene.add(rightSea);
+
+        // --- 공용 함수 ---
+        function createHPBar(width, height, color) {
+            const group = new THREE.Group();
+            const bg = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+            const fg = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ color: color }));
+            fg.position.z = 0.01;
+            group.add(bg, fg);
+            return { group, fg, fullWidth: width };
+        }
+
+        function updateHPBar(bar, current, max) {
+            const ratio = Math.max(0, current / max);
+            bar.fg.scale.x = ratio;
+            bar.fg.position.x = -(bar.fullWidth * (1 - ratio)) / 2;
+        }
+
+        // --- 모델 로딩 ---
+        const loader = new GLTFLoader();
+        let sharedModelRaw;
+        const playerGroup = new THREE.Group();
+        scene.add(playerGroup);
+
+        const modelURL = 'https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb';
+
+        loader.load(modelURL, (gltf) => {
+            sharedModelRaw = gltf.scene;
+            const playerModel = sharedModelRaw.clone();
+            playerModel.scale.set(0.35, 0.35, 0.35);
+            playerModel.rotation.y = Math.PI;
+            playerGroup.add(playerModel);
+            startBtn.disabled = false;
+            startBtn.innerText = "게임 시작";
+        });
+
+        const playerHPBar = createHPBar(1.2, 0.15, 0x00ff00);
+        playerHPBar.group.position.set(0, 3.2, 0);
+        playerGroup.add(playerHPBar.group);
+
+        // --- 아이템 생성 ---
+        function spawnItem(pos) {
+            // 공격 속도 아이템: 번개 모양(노란색 구체로 임시 구현)
+            const itemGeo = new THREE.SphereGeometry(0.4, 8, 8);
+            const itemMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 0.5 });
+            const item = new THREE.Mesh(itemGeo, itemMat);
+            item.position.set(pos.x, 0.5, pos.z);
+            scene.add(item);
+            items.push(item);
+        }
+
+        // --- 기능 함수 ---
+        function shootStone() {
+            const stone = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshStandardMaterial({ color: 0x8b4513 }));
+            stone.position.set(playerGroup.position.x, 1.2, playerGroup.position.z);
+            scene.add(stone);
+            projectiles.push(stone);
+        }
+
+        function spawnEnemy() {
+            if (!gameActive || !sharedModelRaw) return;
+            const enemyGroup = new THREE.Group();
+            const enemyModel = sharedModelRaw.clone();
+            enemyModel.scale.set(0.35, 0.35, 0.35);
+            enemyModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.material = child.material.clone();
+                    child.material.color.set(0xff8888);
+                }
+            });
+            enemyGroup.add(enemyModel);
+            const hpBar = createHPBar(1.2, 0.15, 0xff0000);
+            hpBar.group.position.set(0, 3.2, 0);
+            enemyGroup.add(hpBar.group);
+
+            const spawnX = (Math.random() - 0.5) * (roadWidth - 2);
+            enemyGroup.position.set(spawnX, 0, playerGroup.position.z - 70);
+            scene.add(enemyGroup);
+            enemies.push({ mesh: enemyGroup, hp: 1, maxHP: 1, hpBar: hpBar });
+        }
+
+        function takeDamage(amount) {
+            if (isInvincible || !gameActive) return;
+            playerHP -= amount;
+            updateHPBar(playerHPBar, playerHP, maxPlayerHP);
+            if (playerHP <= 0) {
+                gameActive = false; msg.innerText = "GAME OVER"; startBtn.innerText = "다시 도전"; overlay.style.display = 'flex';
+            } else {
+                isInvincible = true;
+                let flash = 0;
+                const timer = setInterval(() => {
+                    playerGroup.visible = !playerGroup.visible;
+                    if (++flash > 6) { clearInterval(timer); playerGroup.visible = true; isInvincible = false; }
+                }, 100);
+            }
+        }
+
+        const keys = {};
+        window.addEventListener('keydown', (e) => keys[e.key.toLowerCase()] = true);
+        window.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
+
+        startBtn.addEventListener('click', () => {
+            if (playerHP <= 0) {
+                score = 0; playerHP = 10; atkSpeedMult = 1.0; shootInterval = 900;
+                scoreElement.innerText = `SCORE: ${score}`;
+                atkSpeedElement.innerText = `ATK SPEED: 100%`;
+                updateHPBar(playerHPBar, playerHP, maxPlayerHP);
+                playerGroup.position.set(0, 0, 0);
+                enemies.forEach(e => scene.remove(e.mesh));
+                dyingEnemies.forEach(e => scene.remove(e.mesh));
+                projectiles.forEach(p => scene.remove(p));
+                items.forEach(i => scene.remove(i));
+                enemies = []; dyingEnemies = []; projectiles = []; items = [];
+            }
+            overlay.style.display = 'none';
+            gameActive = true;
+            if (!window.spawnerSet) {
+                setInterval(spawnEnemy, 1200);
+                window.spawnerSet = true;
+            }
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (gameActive) {
+                const now = performance.now();
+
+                // 1. 공격 속도에 따른 자동 발사
+                if (now - shootTimer > shootInterval) {
+                    shootStone();
+                    shootTimer = now;
+                }
+
+                // 2. 이동
+                playerGroup.position.z -= 0.18;
+                if (keys['a'] || keys['arrowleft']) playerGroup.position.x -= 0.28;
+                if (keys['d'] || keys['arrowright']) playerGroup.position.x += 0.28;
+                playerGroup.position.x = Math.max(-6.3, Math.min(6.3, playerGroup.position.x));
+
+                camera.position.set(playerGroup.position.x * 0.4, 9, playerGroup.position.z + 8);
+                camera.lookAt(playerGroup.position.x, 0, playerGroup.position.z - 12);
+                playerHPBar.group.quaternion.copy(camera.quaternion);
+
+                // 3. 투사체 & 적 충돌
+                for (let i = projectiles.length - 1; i >= 0; i--) {
+                    const p = projectiles[i]; p.position.z -= 0.7;
+                    for (let j = enemies.length - 1; j >= 0; j--) {
+                        const e = enemies[j];
+                        if (p.position.distanceTo(e.mesh.position) < 1.5) {
+                            scene.remove(p); projectiles.splice(i, 1);
+                            e.hp -= 1;
+                            updateHPBar(e.hpBar, e.hp, e.maxHP);
+                            if (e.hp <= 0) {
+                                // 사망 연출 리스트로 이동
+                                scene.remove(e.hpBar.group); // 체력바는 즉시 제거
+                                dyingEnemies.push({ mesh: e.mesh, timer: 0 });
+                                enemies.splice(j, 1);
+
+                                score += 1;
+                                scoreElement.innerText = `SCORE: ${score}`;
+
+                                // 10% 확률로 아이템 드롭
+                                if (Math.random() < 0.1) spawnItem(e.mesh.position);
+                            }
+                            break;
+                        }
+                    }
+                    if (p && p.position.z < playerGroup.position.z - 60) { scene.remove(p); projectiles.splice(i, 1); }
+                }
+
+                // 4. 쓰러지는 연출 로직 (Dying Enemies)
+                for (let i = dyingEnemies.length - 1; i >= 0; i--) {
+                    const de = dyingEnemies[i];
+                    de.timer += 0.05;
+                    // 바닥으로 회전하며 쓰러짐
+                    de.mesh.rotation.x -= 0.1;
+                    de.mesh.position.y -= 0.02;
+                    if (de.timer > 1.5) { // 1.5초 후 완전히 제거
+                        scene.remove(de.mesh);
+                        dyingEnemies.splice(i, 1);
+                    }
+                }
+
+                // 5. 적군 추격 및 플레이어 충돌
+                for (let i = enemies.length - 1; i >= 0; i--) {
+                    const e = enemies[i]; e.mesh.position.z += 0.08;
+                    e.hpBar.group.quaternion.copy(camera.quaternion);
+                    if (playerGroup.position.distanceTo(e.mesh.position) < 1.8) {
+                        takeDamage(1);
+                        dyingEnemies.push({ mesh: e.mesh, timer: 0 }); // 부딪혀도 쓰러짐
+                        scene.remove(e.hpBar.group);
+                        enemies.splice(i, 1);
+                    }
+                    if (e.mesh.position.z > playerGroup.position.z + 10) { scene.remove(e.mesh); enemies.splice(i, 1); }
+                }
+
+                // 6. 아이템 획득 로직
+                for (let i = items.length - 1; i >= 0; i--) {
+                    const item = items[i];
+                    item.rotation.y += 0.05; // 회전 연출
+                    if (playerGroup.position.distanceTo(item.position) < 1.5) {
+                        // 공격 속도 강화 (10% 증가)
+                        atkSpeedMult += 0.1;
+                        shootInterval = 900 / atkSpeedMult;
+                        atkSpeedElement.innerText = `ATK SPEED: ${Math.round(atkSpeedMult * 100)}%`;
+
+                        scene.remove(item);
+                        items.splice(i, 1);
+                    } else if (item.position.z > playerGroup.position.z + 10) {
+                        scene.remove(item);
+                        items.splice(i, 1);
+                    }
+                }
+
+                road.position.z = playerGroup.position.z - 500;
+                leftSea.position.z = playerGroup.position.z - 500;
+                rightSea.position.z = playerGroup.position.z - 500;
+            }
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
