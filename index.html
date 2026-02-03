@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Genesis - Compact Hearts</title>
+    <title>Genesis - Wide Items Update</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #87CEEB; font-family: sans-serif; touch-action: none; user-select: none; }
         #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
@@ -56,9 +56,9 @@
         <div id="hud">
             <div id="score-display">SCORE: 0</div>
             <div id="stats-display">
-                <span class="stat-item" style="color:#00ffff">SPD: 100%</span>
-                <span class="stat-item" style="color:#ff5555">CNT: 1</span>
-                <span class="stat-item" style="color:#ffff00">SIZE: 100%</span>
+                <span class="stat-item" style="color:#00ffff">Spd: 100%</span>
+                <span class="stat-item" style="color:#ff5555">Pow: 1</span>
+                <span class="stat-item" style="color:#ffff00">Larg: 100%</span>
             </div>
         </div>
         <div id="virtual-pad"><div id="pad-knob"></div></div>
@@ -81,7 +81,9 @@
         let enemies = [], projectiles = [], enemyProjectiles = [];
         let items = [], dyingEnemies = [];
         let hpHearts = [], particles = [];
+        
         let isDragging = false, startX = 0, currentX = 0, moveDir = 0;
+        const keys = {};
 
         const scoreEl = document.getElementById('score-display');
         const statsEl = document.getElementById('stats-display');
@@ -101,7 +103,7 @@
         dirLight.position.set(10, 30, 20);
         scene.add(dirLight);
 
-        // --- 배경 설정 ---
+        // --- 배경 ---
         const roadWidth = 16;
         const roadMat = new THREE.MeshLambertMaterial({ color: 0xccaa66 }); 
         const road = new THREE.Mesh(new THREE.PlaneGeometry(roadWidth, 2000), roadMat);
@@ -145,27 +147,24 @@
             const ratio = Math.max(0, current / max);
             bar.fg.scale.x = ratio; bar.fg.position.x = -(bar.fullWidth * (1 - ratio)) / 2;
         }
+        
+        // --- 텍스트 변경: Spd, Pow, Larg ---
         function updateStatsUI() {
             statsEl.innerHTML = `
-                <span class="stat-item" style="color:#00ffff">SPD: ${Math.round(atkSpeedMult*100)}%</span>
-                <span class="stat-item" style="color:#ff5555">CNT: ${projectileCount}</span>
-                <span class="stat-item" style="color:#ffff00">SIZE: ${Math.round(projectileSize*100)}%</span>
+                <span class="stat-item" style="color:#00ffff">Spd: ${Math.round(atkSpeedMult*100)}%</span>
+                <span class="stat-item" style="color:#ff5555">Pow: ${projectileCount}</span>
+                <span class="stat-item" style="color:#ffff00">Larg: ${Math.round(projectileSize*100)}%</span>
             `;
         }
 
-        // --- 하트 설정 ---
         const heartGeo = new THREE.SphereGeometry(0.3, 8, 8);
         const heartMat = new THREE.MeshLambertMaterial({ color: 0xff0000, emissive: 0x550000 });
-        
         function initHeartTrail() {
-            hpHearts.forEach(h => scene.remove(h)); 
-            hpHearts = [];
+            hpHearts.forEach(h => scene.remove(h)); hpHearts = [];
             for(let i=0; i<maxPlayerHP; i++) {
                 const heart = new THREE.Mesh(heartGeo, heartMat);
-                // 초기 위치 (일단 플레이어 뒤쪽)
                 heart.position.set(0, 1, 5);
-                scene.add(heart); 
-                hpHearts.push(heart);
+                scene.add(heart); hpHearts.push(heart);
             }
         }
 
@@ -192,6 +191,9 @@
             document.getElementById('start-button').innerText = "게임 시작";
         });
 
+        // 조작
+        window.addEventListener('keydown', (e) => keys[e.key.toLowerCase()] = true);
+        window.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
         const pad = document.getElementById('virtual-pad'); const knob = document.getElementById('pad-knob');
         const onStart = (x, y) => {
             if (!gameActive) return; isDragging = true; startX = x;
@@ -210,13 +212,20 @@
         window.addEventListener('touchmove', e => onMove(e.touches[0].clientX));
         window.addEventListener('touchend', onEnd);
 
+        // --- 아이템 변경: 네모나고 넓은 형태 ---
         function spawnItem(pos) {
             const rand = Math.random(); let type, color;
             if (rand < 0.33) { type = 'speed'; color = 0x00ffff; } 
             else if (rand < 0.66) { type = 'count'; color = 0xff0000; } 
             else { type = 'size'; color = 0xffff00; }
-            const item = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.6 }));
-            item.position.set(pos.x, 0.5, pos.z); item.userData = { type: type };
+
+            // 가로로 긴 박스 형태 (Width: 1.2, Height: 0.4, Depth: 0.4)
+            const itemGeo = new THREE.BoxGeometry(1.2, 0.4, 0.4);
+            const itemMat = new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.6 });
+            const item = new THREE.Mesh(itemGeo, itemMat);
+            
+            item.position.set(pos.x, 0.5, pos.z); 
+            item.userData = { type: type };
             scene.add(item); items.push(item);
         }
 
@@ -252,15 +261,11 @@
         function takeDamage(sourceType) {
             if (!gameActive || playerHP <= 0) return;
             if (sourceType === 'hit' && isInvincible) return;
-
             playerHP--;
-            // 뒤에서부터 하트 제거
             const lastHeart = hpHearts.pop();
             if(lastHeart) { spawnExplosion(lastHeart.position); scene.remove(lastHeart); }
-
-            if (playerHP <= 0) { 
-                gameOver();
-            } else if (sourceType === 'hit') {
+            if (playerHP <= 0) gameOver();
+            else if (sourceType === 'hit') {
                 isInvincible = true; let blink = 0;
                 const timer = setInterval(() => { playerGroup.visible = !playerGroup.visible; if (++blink > 6) { clearInterval(timer); playerGroup.visible = true; isInvincible = false; } }, 100);
             }
@@ -284,34 +289,21 @@
             requestAnimationFrame(animate);
             if (gameActive) {
                 playerGroup.position.z -= 0.18; 
-                if (moveDir !== 0) playerGroup.position.x += moveDir * 0.14;
+                let finalMoveDir = moveDir;
+                if (keys['a'] || keys['arrowleft']) finalMoveDir = -1;
+                if (keys['d'] || keys['arrowright']) finalMoveDir = 1;
+                if (finalMoveDir !== 0) playerGroup.position.x += finalMoveDir * 0.14;
                 playerGroup.position.x = Math.max(-7, Math.min(7, playerGroup.position.x));
 
                 camera.position.set(playerGroup.position.x * 0.5, 8, playerGroup.position.z + 10);
                 camera.lookAt(playerGroup.position.x, 0, playerGroup.position.z - 10);
 
-                // --- 하트 배치 로직 수정 (2열 횡대) ---
                 hpHearts.forEach((heart, i) => {
-                    // 2줄로 배치 (한 줄에 5개씩)
-                    // row 0: 0,1,2,3,4 (앞줄)
-                    // row 1: 5,6,7,8,9 (뒷줄)
-                    const row = Math.floor(i / 5); 
-                    const col = i % 5;
-                    
-                    // X축: 중앙 정렬 (-2, -1, 0, 1, 2)
-                    const xOffset = (col - 2) * 0.6; 
-                    
-                    // Z축: 플레이어 등 뒤 + 줄 간격
-                    const zOffset = 2.5 + (row * 0.7);
-
-                    const targetX = playerGroup.position.x + xOffset;
-                    const targetZ = playerGroup.position.z + zOffset;
-
-                    // 부드럽게 따라오기
+                    const row = Math.floor(i / 5); const col = i % 5;
+                    const xOffset = (col - 2) * 0.6; const zOffset = 2.5 + (row * 0.7);
+                    const targetX = playerGroup.position.x + xOffset; const targetZ = playerGroup.position.z + zOffset;
                     heart.position.x = THREE.MathUtils.lerp(heart.position.x, targetX, 0.1);
                     heart.position.z = THREE.MathUtils.lerp(heart.position.z, targetZ, 0.1);
-                    
-                    // 둥실거림 (각자 조금씩 다르게)
                     heart.position.y = 1.0 + Math.sin(performance.now() * 0.005 + i) * 0.15;
                 });
 
@@ -364,7 +356,8 @@
 
                 items.forEach((item, i) => {
                     item.rotation.y += 0.05;
-                    if (playerGroup.position.distanceTo(item.position) < 1.5) {
+                    // 가로로 길어졌으므로 획득 범위 판정을 조금 더 너그럽게
+                    if (playerGroup.position.distanceTo(item.position) < 1.8) {
                         const type = item.userData.type;
                         if (type === 'speed') { atkSpeedMult += 0.1; shootInterval = 900 / atkSpeedMult; } 
                         else if (type === 'count') projectileCount += 1;
