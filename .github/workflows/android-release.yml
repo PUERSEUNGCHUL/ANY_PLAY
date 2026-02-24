@@ -1,0 +1,65 @@
+name: Build and Upload APK to GitHub Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '릴리즈 태그 (예: v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Install deps
+        run: yarn install
+
+      - name: Prebuild Android
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Build Debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Resolve tag
+        id: resolve_tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "value=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+
+      - name: Create/Update GitHub Release + upload APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.resolve_tag.outputs.value }}
+          files: android/app/build/outputs/apk/debug/*.apk
+          generate_release_notes: true

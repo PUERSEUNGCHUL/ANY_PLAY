@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# expo
+.expo/
+.expo-shared/
+
+# android build outputs / caches
+android/app/build/
+android/.gradle/
+android/build/
+
+# generic build outputs
+**/build/
+
+# package artifacts
+*.apk
+*.aab
+
+# signing keys
+*.jks
+*.keystore
