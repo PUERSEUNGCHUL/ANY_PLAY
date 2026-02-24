@@ -29,12 +29,12 @@ jobs:
           java-version: 17
           cache: gradle
 
-      - name: Build Debug APK
+      - name: Build Release APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleRelease
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: app-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
