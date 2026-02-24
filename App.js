@@ -38,7 +38,7 @@ const RECIPES = {
   '001+003': '104',
 };
 
-const BASE4_PRIORITY = [
+const BASE4_MAP = [
   { dir: 'N', defId: '001' },
   { dir: 'E', defId: '002' },
   { dir: 'S', defId: '003' },
@@ -46,13 +46,16 @@ const BASE4_PRIORITY = [
 ];
 
 const defById = Object.fromEntries(ELEMENT_DEFS.map((d) => [d.id, d]));
-const sortCombo = (a, b) => [a, b].sort().join('+');
-const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-const getToday = () => new Date().toISOString().slice(0, 10);
 
-function parseDeviceType(width, height) {
-  const isPortrait = height >= width;
-  return isPortrait && width < 700 ? 'phone' : 'pad';
+const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const sortCombo = (a, b) => [a, b].sort().join('+');
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+function parseAspect(width, height) {
+  const portrait = height >= width;
+  return portrait && width < 700 ? 'phone' : 'pad';
 }
 
 export default function App() {
@@ -60,40 +63,22 @@ export default function App() {
   const [instances, setInstances] = useState([]);
   const [discoveredByCombine, setDiscoveredByCombine] = useState([]);
   const [favorites, setFavorites] = useState([]);
-  const [lastWorkspaceTapPoint, setLastWorkspaceTapPoint] = useState(null);
+  const [lastTap, setLastTap] = useState(null);
   const [mode, setMode] = useState('NORMAL');
   const [draggingId, setDraggingId] = useState(null);
   const [showCompendium, setShowCompendium] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const [adHint, setAdHint] = useState({ date: getToday(), used: 0, limit: 3 });
+  const [adHint, setAdHint] = useState({ date: today(), used: 0, limit: 3 });
 
-  const lastTapRef = useRef(null);
-  const dragStartPosRef = useRef({ x: 0, y: 0 });
-  const loadedRef = useRef(false);
+  const lastTouchRef = useRef(null);
+  const dragStartPos = useRef({ x: 0, y: 0 });
 
-  const deviceType = parseDeviceType(layout.width, layout.height);
+  const deviceType = parseAspect(layout.width, layout.height);
   const maxElements = deviceType === 'phone' ? 80 : 120;
-  const baseSpawnRadius = Math.max(deviceType === 'phone' ? 56 : 72, ELEMENT_RADIUS * (deviceType === 'phone' ? 2.4 : 2.8));
-
-  const discoveredSet = useMemo(
-    () => new Set([...ELEMENT_DEFS.filter((d) => d.discoveredByDefault).map((d) => d.id), ...discoveredByCombine]),
-    [discoveredByCombine]
+  const baseSpawnRadius = useMemo(
+    () => Math.max(deviceType === 'phone' ? 56 : 72, ELEMENT_RADIUS * (deviceType === 'phone' ? 2.4 : 2.8)),
+    [deviceType]
   );
-
-  const compendiumList = useMemo(
-    () => ELEMENT_DEFS.filter((d) => discoveredSet.has(d.id)).sort((a, b) => a.id.localeCompare(b.id)),
-    [discoveredSet]
-  );
-
-  const remain = maxElements - instances.length;
-
-  const trashZoneRect = useMemo(() => {
-    if (mode !== 'DRAGGING') return null;
-    if (deviceType === 'phone') {
-      return { x: 0, y: 0, width: 86, height: layout.height };
-    }
-    return { x: 0, y: layout.height - 86, width: layout.width, height: 86 };
-  }, [mode, deviceType, layout.height, layout.width]);
 
   useEffect(() => {
     const sub = Dimensions.addEventListener('change', ({ window }) => setLayout(window));
@@ -103,30 +88,24 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        loadedRef.current = true;
-        return;
-      }
+      if (!raw) return;
       const saved = JSON.parse(raw);
       setDiscoveredByCombine(saved.collection?.discoveredByCombine ?? []);
-      setFavorites((saved.collection?.favorites ?? []).slice(0, 10));
-      setLastWorkspaceTapPoint(saved.ui?.lastWorkspaceTapPoint ?? null);
-      const hint = saved.adHint ?? { date: getToday(), used: 0, limit: 3 };
-      setAdHint(hint.date === getToday() ? hint : { date: getToday(), used: 0, limit: 3 });
-      const loadedInstances = (saved.canvas?.instances ?? []).map((it) => ({
-        instanceId: it.instanceId,
-        definitionId: it.definitionId,
+      setFavorites(saved.collection?.favorites?.slice(0, 10) ?? []);
+      setLastTap(saved.ui?.lastWorkspaceTapPoint ?? null);
+      const ad = saved.adHint ?? { date: today(), used: 0, limit: 3 };
+      setAdHint(ad.date === today() ? ad : { date: today(), used: 0, limit: 3 });
+      const loaded = (saved.canvas?.instances ?? []).map((it) => ({
+        ...it,
         x: it.xNorm * layout.width,
         y: it.yNorm * layout.height,
       }));
-      setInstances(loadedInstances);
-      loadedRef.current = true;
+      setInstances(loaded);
     })();
-  }, [layout.height, layout.width]);
+  }, [layout.width, layout.height]);
 
   useEffect(() => {
-    if (!loadedRef.current) return;
-    const t = setTimeout(async () => {
+    const handle = setTimeout(async () => {
       const payload = {
         canvas: {
           instances: instances.map((it) => ({
@@ -140,155 +119,140 @@ export default function App() {
           discoveredByCombine,
           favorites,
         },
-        ui: {
-          lastWorkspaceTapPoint,
-        },
+        ui: { lastWorkspaceTapPoint: lastTap },
         adHint,
       };
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     }, 450);
+    return () => clearTimeout(handle);
+  }, [instances, discoveredByCombine, favorites, lastTap, adHint, layout.width, layout.height]);
 
-    return () => clearTimeout(t);
-  }, [instances, discoveredByCombine, favorites, lastWorkspaceTapPoint, adHint, layout.height, layout.width]);
+  const discoveredSet = useMemo(
+    () => new Set([...ELEMENT_DEFS.filter((d) => d.discoveredByDefault).map((d) => d.id), ...discoveredByCombine]),
+    [discoveredByCombine]
+  );
 
-  const isInsideWorkspace = (x, y) => x >= ELEMENT_RADIUS && x <= layout.width - ELEMENT_RADIUS && y >= ELEMENT_RADIUS && y <= layout.height - ELEMENT_RADIUS;
+  const compendiumList = useMemo(
+    () => ELEMENT_DEFS.filter((d) => discoveredSet.has(d.id)).sort((a, b) => a.id.localeCompare(b.id)),
+    [discoveredSet]
+  );
 
-  const isCollision = (x, y, sourceList = instances, exceptId = null) =>
-    sourceList.some((it) => it.instanceId !== exceptId && Math.hypot(it.x - x, it.y - y) < MIN_GAP);
+  const remain = maxElements - instances.length;
 
-  const nearbyPlacement = (origin, sourceList = instances, exceptId = null, startRadius = baseSpawnRadius) => {
-    const angles = [0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (deg * Math.PI) / 180);
+  const barRect = useMemo(() => {
+    if (mode !== 'DRAGGING') return null;
+    if (deviceType === 'phone') {
+      return { x: 0, y: 0, width: 86, height: layout.height };
+    }
+    return { x: 0, y: layout.height - 86, width: layout.width, height: 86 };
+  }, [mode, deviceType, layout.width, layout.height]);
+
+  const isInsideWorkspace = (x, y) => x > ELEMENT_RADIUS && x < layout.width - ELEMENT_RADIUS && y > ELEMENT_RADIUS && y < layout.height - ELEMENT_RADIUS;
+
+  const collides = (x, y, exceptId = null, list = instances) =>
+    list.some((it) => it.instanceId !== exceptId && Math.hypot(it.x - x, it.y - y) < MIN_GAP);
+
+  const nearbyPlacement = (origin, list = instances, exceptId = null) => {
+    const angles = [0, 45, 90, 135, 180, 225, 270, 315].map((d) => (d * Math.PI) / 180);
     const step = Math.max(12, ELEMENT_RADIUS * 0.5);
     const dMax = 3.5 * baseSpawnRadius;
-
-    for (let radius = startRadius; radius <= dMax; radius += step) {
-      for (const angle of angles) {
-        const px = origin.x + Math.cos(angle) * radius;
-        const py = origin.y + Math.sin(angle) * radius;
-        if (!isInsideWorkspace(px, py)) continue;
-        if (isCollision(px, py, sourceList, exceptId)) continue;
-        return { x: px, y: py };
+    for (let d = baseSpawnRadius; d <= dMax; d += step) {
+      for (const a of angles) {
+        const x = origin.x + Math.cos(a) * d;
+        const y = origin.y + Math.sin(a) * d;
+        if (!isInsideWorkspace(x, y)) continue;
+        if (collides(x, y, exceptId, list)) continue;
+        return { x, y };
       }
     }
     return null;
   };
 
-  const spawnOne = (definitionId, anchor, sourceList = instances) => {
-    if (sourceList.length >= maxElements) return { ok: false, reason: 'limit' };
-    const origin = anchor ?? lastWorkspaceTapPoint ?? { x: layout.width / 2, y: layout.height / 2 };
-    const pos = nearbyPlacement(origin, sourceList);
-    if (!pos) return { ok: false, reason: 'space' };
-    const newInst = { instanceId: uid(), definitionId, x: pos.x, y: pos.y };
-    setInstances((prev) => [...prev, newInst]);
-    return { ok: true };
+  const spawnOne = (definitionId, anchor) => {
+    if (instances.length >= maxElements) return false;
+    const pos = nearbyPlacement(anchor ?? lastTap ?? { x: layout.width / 2, y: layout.height / 2 });
+    if (!pos) return false;
+    setInstances((prev) => [...prev, { instanceId: uid(), definitionId, x: pos.x, y: pos.y }]);
+    return true;
   };
 
-  const findTopElementAt = (x, y, source = instances) => {
-    for (let i = source.length - 1; i >= 0; i -= 1) {
-      const it = source[i];
-      if (Math.hypot(it.x - x, it.y - y) <= ELEMENT_RADIUS) return it;
-    }
-    return null;
-  };
-
-  const spawnBase4OnDoubleTap = (x, y) => {
-    if (remain <= 0) {
-      Alert.alert('실패', '캔버스가 가득 찼어요');
-      return;
-    }
-
-    const offsetMap = {
+  const spawnBase4ByDoubleTap = (x, y) => {
+    if (remain <= 0) return Alert.alert('실패', '캔버스가 가득 찼어요');
+    const dirOffset = {
       N: { x: 0, y: -baseSpawnRadius },
       E: { x: baseSpawnRadius, y: 0 },
       S: { x: 0, y: baseSpawnRadius },
       W: { x: -baseSpawnRadius, y: 0 },
     };
-
-    let successCount = 0;
-    let working = [...instances];
-    for (const item of BASE4_PRIORITY.slice(0, Math.min(4, remain))) {
-      const anchor = { x: x + offsetMap[item.dir].x, y: y + offsetMap[item.dir].y };
-      const placed = nearbyPlacement(anchor, working, null, baseSpawnRadius * 0.6);
-      if (!placed) continue;
-      const newInst = { instanceId: uid(), definitionId: item.defId, x: placed.x, y: placed.y };
-      working.push(newInst);
-      successCount += 1;
+    let success = 0;
+    for (const row of BASE4_MAP.slice(0, Math.min(4, remain))) {
+      const t = { x: x + dirOffset[row.dir].x, y: y + dirOffset[row.dir].y };
+      const ok = spawnOne(row.defId, t);
+      if (ok) success += 1;
     }
-
-    if (successCount === 0) {
-      Alert.alert('실패', '놓을 공간이 없어요');
-      return;
-    }
-
-    setInstances(working);
-    if (successCount < 4) {
-      Alert.alert('안내', `공간 부족으로 ${successCount}개만 생성됨`);
-    }
+    if (success === 0) Alert.alert('실패', '놓을 공간이 없어요');
+    else if (success < 4) Alert.alert('안내', `공간 부족으로 ${success}개만 생성됨`);
   };
 
-  const attemptCombineAtDrop = (sourceId, dropX, dropY) => {
-    setInstances((prev) => {
-      const source = prev.find((it) => it.instanceId === sourceId);
-      if (!source) return prev;
-
-      const target = [...prev]
-        .reverse()
-        .find((it) => it.instanceId !== sourceId && Math.hypot(it.x - dropX, it.y - dropY) <= ELEMENT_RADIUS);
-
-      if (!target) return prev;
-
-      const comboKey = sortCombo(source.definitionId, target.definitionId);
-      const resultId = RECIPES[comboKey];
-      if (!resultId) {
-        Alert.alert('실패', '아직 발견되지 않은 조합');
-        return prev;
-      }
-
-      const withoutInputs = prev.filter((it) => it.instanceId !== sourceId && it.instanceId !== target.instanceId);
-      const center = { x: (source.x + target.x) / 2, y: (source.y + target.y) / 2 };
-      const pos = nearbyPlacement(center, withoutInputs, null, baseSpawnRadius * 0.5);
-
-      if (!pos) {
-        Alert.alert('실패', '결과를 놓을 공간이 없어요');
-        return prev;
-      }
-
-      if (!discoveredByCombine.includes(resultId)) {
-        setDiscoveredByCombine((curr) => [...curr, resultId]);
-      }
-
-      return [...withoutInputs, { instanceId: uid(), definitionId: resultId, x: pos.x, y: pos.y }];
-    });
-  };
-
-  const handleWorkspacePress = (x, y) => {
-    if (mode === 'DRAGGING') return;
-
-    setLastWorkspaceTapPoint({ x, y });
+  const handleWorkspaceTap = (x, y) => {
+    setLastTap({ x, y });
     const now = Date.now();
     const hit = findTopElementAt(x, y);
-    const targetKey = hit ? `el:${hit.instanceId}` : 'empty';
-    const prevTap = lastTapRef.current;
-
+    const target = hit ? `el:${hit.instanceId}` : 'empty';
+    const prev = lastTouchRef.current;
     if (
-      prevTap &&
-      prevTap.targetKey === targetKey &&
-      now - prevTap.time <= DOUBLE_TAP_TIME_MS &&
-      Math.hypot(prevTap.x - x, prevTap.y - y) <= TAP_SLOP_DP
+      prev &&
+      now - prev.time <= DOUBLE_TAP_TIME_MS &&
+      Math.hypot(prev.x - x, prev.y - y) <= TAP_SLOP_DP &&
+      prev.target === target
     ) {
-      lastTapRef.current = null;
+      lastTouchRef.current = null;
       if (hit) {
-        const res = spawnOne(hit.definitionId, { x: hit.x, y: hit.y });
-        if (!res.ok) {
-          Alert.alert('실패', res.reason === 'limit' ? '캔버스가 가득 찼어요' : '놓을 공간이 없어요');
-        }
+        const ok = spawnOne(hit.definitionId, { x: hit.x, y: hit.y });
+        if (!ok) Alert.alert('실패', instances.length >= maxElements ? '캔버스가 가득 찼어요' : '놓을 공간이 없어요');
       } else {
-        spawnBase4OnDoubleTap(x, y);
+        spawnBase4ByDoubleTap(x, y);
       }
       return;
     }
+    lastTouchRef.current = { x, y, time: now, target };
+  };
 
-    lastTapRef.current = { x, y, time: now, targetKey };
+  const findTopElementAt = (x, y) => {
+    for (let i = instances.length - 1; i >= 0; i -= 1) {
+      const it = instances[i];
+      if (Math.hypot(it.x - x, it.y - y) <= ELEMENT_RADIUS) return it;
+    }
+    return null;
+  };
+
+  const attemptCombine = (sourceId, dropX, dropY) => {
+    const source = instances.find((i) => i.instanceId === sourceId);
+    if (!source) return;
+    const target = instances
+      .filter((i) => i.instanceId !== sourceId)
+      .find((i) => Math.hypot(i.x - dropX, i.y - dropY) <= ELEMENT_RADIUS);
+    if (!target) return;
+
+    const comboKey = sortCombo(source.definitionId, target.definitionId);
+    const resultId = RECIPES[comboKey];
+    if (!resultId) {
+      Alert.alert('실패', '아직 발견되지 않은 조합');
+      return;
+    }
+
+    const withoutInputs = instances.filter((i) => i.instanceId !== sourceId && i.instanceId !== target.instanceId);
+    const middle = { x: (source.x + target.x) / 2, y: (source.y + target.y) / 2 };
+    const finalPos = nearbyPlacement(middle, withoutInputs);
+    if (!finalPos) {
+      Alert.alert('실패', '결과를 놓을 공간이 없어요');
+      return;
+    }
+
+    setInstances([...withoutInputs, { instanceId: uid(), definitionId: resultId, x: finalPos.x, y: finalPos.y }]);
+    if (!discoveredByCombine.includes(resultId)) {
+      setDiscoveredByCombine((prev) => [...prev, resultId]);
+    }
   };
 
   const toggleFavorite = (defId) => {
@@ -303,72 +267,65 @@ export default function App() {
   };
 
   const quickSpawn = (defId) => {
-    const res = spawnOne(defId, lastWorkspaceTapPoint ?? { x: layout.width / 2, y: layout.height / 2 });
-    if (!res.ok) {
-      Alert.alert('실패', res.reason === 'limit' ? '캔버스가 가득 찼어요' : '놓을 공간이 없어요');
-    }
+    const ok = spawnOne(defId, lastTap ?? { x: layout.width / 2, y: layout.height / 2 });
+    if (!ok) Alert.alert('실패', instances.length >= maxElements ? '캔버스가 가득 찼어요' : '놓을 공간이 없어요');
   };
 
   const hintCandidates = useMemo(() => {
     const discovered = new Set([...ELEMENT_DEFS.filter((d) => d.discoveredByDefault).map((d) => d.id), ...discoveredByCombine]);
     return Object.entries(RECIPES)
-      .map(([k, result]) => ({ pair: k.split('+'), result }))
+      .map(([k, v]) => ({ key: k, result: v, pair: k.split('+') }))
       .filter((r) => !discovered.has(r.result) && discovered.has(r.pair[0]) && discovered.has(r.pair[1]));
   }, [discoveredByCombine]);
 
   const useRewardedHint = () => {
-    const normalized = adHint.date === getToday() ? adHint : { date: getToday(), used: 0, limit: 3 };
+    const normalized = adHint.date === today() ? adHint : { date: today(), used: 0, limit: 3 };
     if (normalized.used >= normalized.limit) {
       Alert.alert('힌트 제한', '오늘은 힌트를 모두 사용했어요.');
       setAdHint(normalized);
       return;
     }
-
-    const candidate = hintCandidates[0];
-    if (!candidate) {
+    const cand = hintCandidates[0];
+    if (!cand) {
       Alert.alert('힌트', '현재 가능한 미발견 조합이 없어요.');
       return;
     }
-
     setAdHint({ ...normalized, used: normalized.used + 1 });
-    Alert.alert('힌트', `${defById[candidate.pair[0]].name} + ${defById[candidate.pair[1]].name} = ${defById[candidate.result].name}`);
+    const a = defById[cand.pair[0]].name;
+    const b = defById[cand.pair[1]].name;
+    const r = defById[cand.result].name;
+    Alert.alert('힌트', `${a} + ${b} = ${r}`);
   };
 
-  const getElementPanResponder = (instance) =>
+  const elementResponder = (instance) =>
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_, g) => Math.hypot(g.dx, g.dy) > DRAG_START_DP,
-      onPanResponderGrant: () => {
-        dragStartPosRef.current = { x: instance.x, y: instance.y };
+      onPanResponderGrant: (evt) => {
         setDraggingId(instance.instanceId);
         setMode('DRAGGING');
+        dragStartPos.current = { x: instance.x, y: instance.y };
       },
       onPanResponderMove: (_, g) => {
         setInstances((prev) =>
-          prev.map((it) => {
-            if (it.instanceId !== instance.instanceId) return it;
-            const nx = Math.max(ELEMENT_RADIUS, Math.min(layout.width - ELEMENT_RADIUS, dragStartPosRef.current.x + g.dx));
-            const ny = Math.max(ELEMENT_RADIUS, Math.min(layout.height - ELEMENT_RADIUS, dragStartPosRef.current.y + g.dy));
-            return { ...it, x: nx, y: ny };
-          })
+          prev.map((it) =>
+            it.instanceId === instance.instanceId
+              ? {
+                  ...it,
+                  x: Math.min(layout.width - ELEMENT_RADIUS, Math.max(ELEMENT_RADIUS, dragStartPos.current.x + g.dx)),
+                  y: Math.min(layout.height - ELEMENT_RADIUS, Math.max(ELEMENT_RADIUS, dragStartPos.current.y + g.dy)),
+                }
+              : it
+          )
         );
       },
-      onPanResponderRelease: (_, g) => {
-        const dropX = Math.max(ELEMENT_RADIUS, Math.min(layout.width - ELEMENT_RADIUS, dragStartPosRef.current.x + g.dx));
-        const dropY = Math.max(ELEMENT_RADIUS, Math.min(layout.height - ELEMENT_RADIUS, dragStartPosRef.current.y + g.dy));
-
-        if (
-          trashZoneRect &&
-          dropX >= trashZoneRect.x &&
-          dropX <= trashZoneRect.x + trashZoneRect.width &&
-          dropY >= trashZoneRect.y &&
-          dropY <= trashZoneRect.y + trashZoneRect.height
-        ) {
-          setInstances((prev) => prev.filter((it) => it.instanceId !== instance.instanceId));
-        } else {
-          attemptCombineAtDrop(instance.instanceId, dropX, dropY);
+      onPanResponderRelease: () => {
+        const me = instances.find((i) => i.instanceId === instance.instanceId);
+        if (me && barRect && me.x >= barRect.x && me.x <= barRect.x + barRect.width && me.y >= barRect.y && me.y <= barRect.y + barRect.height) {
+          setInstances((prev) => prev.filter((i) => i.instanceId !== instance.instanceId));
+        } else if (me) {
+          attemptCombine(instance.instanceId, me.x, me.y);
         }
-
         setDraggingId(null);
         setMode('NORMAL');
       },
@@ -378,15 +335,16 @@ export default function App() {
       },
     });
 
-  const quickSlots = [...Array(10)].map((_, idx) => favorites[idx] ?? null);
+  const quickSlots = [...Array(10)].map((_, i) => favorites[i] ?? null);
 
   return (
     <SafeAreaView style={styles.container}>
       <Pressable
         style={styles.workspace}
         onPress={(e) => {
+          if (mode === 'DRAGGING') return;
           const { locationX, locationY } = e.nativeEvent;
-          handleWorkspacePress(locationX, locationY);
+          handleWorkspaceTap(locationX, locationY);
         }}
       >
         {instances.map((it) => {
@@ -394,18 +352,11 @@ export default function App() {
           return (
             <View
               key={it.instanceId}
-              {...getElementPanResponder(it).panHandlers}
-              style={[
-                styles.element,
-                {
-                  left: it.x - ELEMENT_RADIUS,
-                  top: it.y - ELEMENT_RADIUS,
-                  opacity: draggingId === it.instanceId ? 0.92 : 1,
-                },
-              ]}
+              {...elementResponder(it).panHandlers}
+              style={[styles.element, { left: it.x - ELEMENT_RADIUS, top: it.y - ELEMENT_RADIUS, opacity: draggingId === it.instanceId ? 0.9 : 1 }]}
             >
               <Text style={styles.elementEmoji}>{def?.emoji ?? '❓'}</Text>
-              <Text style={styles.elementLabel}>{def?.name ?? '알수없음'}</Text>
+              <Text style={styles.elementLabel}>{def?.name}</Text>
             </View>
           );
         })}
@@ -417,7 +368,7 @@ export default function App() {
             <Text style={styles.barBtnText}>도감</Text>
           </Pressable>
           {quickSlots.map((defId, idx) => (
-            <Pressable key={`quick-${idx}`} style={styles.barBtn} onPress={() => defId && quickSpawn(defId)}>
+            <Pressable key={`q-${idx}`} style={styles.barBtn} onPress={() => defId && quickSpawn(defId)}>
               <Text style={styles.barBtnText}>{defId ? defById[defId].emoji : '+'}</Text>
             </Pressable>
           ))}
@@ -439,24 +390,20 @@ export default function App() {
               <View key={d.id} style={styles.row}>
                 <Text>{`${d.id} ${d.emoji} ${d.name}`}</Text>
                 <View style={styles.rowRight}>
-                  <Pressable style={styles.rowBtn} onPress={() => toggleFavorite(d.id)}>
-                    <Text>{favorites.includes(d.id) ? '★' : '☆'}</Text>
-                  </Pressable>
+                  <Pressable onPress={() => toggleFavorite(d.id)} style={styles.rowBtn}><Text>{favorites.includes(d.id) ? '★' : '☆'}</Text></Pressable>
                   <Pressable
-                    style={styles.rowBtn}
                     onPress={() => {
                       setShowCompendium(false);
                       quickSpawn(d.id);
                     }}
+                    style={styles.rowBtn}
                   >
                     <Text>배치</Text>
                   </Pressable>
                 </View>
               </View>
             ))}
-            <Pressable style={styles.closeBtn} onPress={() => setShowCompendium(false)}>
-              <Text>닫기</Text>
-            </Pressable>
+            <Pressable style={styles.closeBtn} onPress={() => setShowCompendium(false)}><Text>닫기</Text></Pressable>
           </View>
         </View>
       </Modal>
@@ -466,16 +413,12 @@ export default function App() {
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>도움말</Text>
             <Text>• 빈 공간 더블탭: 기본 4요소 생성</Text>
-            <Text>• 요소 더블탭: 요소 복제</Text>
-            <Text>• 드래그 후 드롭: 조합 시도</Text>
-            <Text>• 드래그 중 바 영역에 드롭: 삭제</Text>
-            <Text>{`힌트 사용량: ${adHint.date === getToday() ? adHint.used : 0}/${adHint.limit}`}</Text>
-            <Pressable style={styles.closeBtn} onPress={useRewardedHint}>
-              <Text>광고 보고 힌트 보기</Text>
-            </Pressable>
-            <Pressable style={styles.closeBtn} onPress={() => setShowHelp(false)}>
-              <Text>닫기</Text>
-            </Pressable>
+            <Text>• 요소 더블탭: 복제</Text>
+            <Text>• 드래그/드롭: 조합</Text>
+            <Text>• 드래그 중 바 영역 드롭: 삭제</Text>
+            <Text>{`힌트 사용량: ${adHint.date === today() ? adHint.used : 0}/${adHint.limit}`}</Text>
+            <Pressable style={styles.closeBtn} onPress={useRewardedHint}><Text>광고 보고 힌트 보기</Text></Pressable>
+            <Pressable style={styles.closeBtn} onPress={() => setShowHelp(false)}><Text>닫기</Text></Pressable>
           </View>
         </View>
       </Modal>
@@ -492,74 +435,35 @@ const styles = StyleSheet.create({
     height: ELEMENT_RADIUS * 2,
     borderRadius: ELEMENT_RADIUS,
     backgroundColor: '#fff',
-    borderColor: '#263238',
     borderWidth: 1,
+    borderColor: '#333',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  elementEmoji: { fontSize: 15 },
+  elementEmoji: { fontSize: 16 },
   elementLabel: { fontSize: 10 },
   buttonBar: {
     position: 'absolute',
     backgroundColor: 'rgba(0,0,0,0.35)',
-    padding: 8,
     gap: 6,
+    padding: 8,
   },
-  buttonBarPhone: {
-    top: 0,
-    bottom: 0,
-    left: 0,
-    width: 86,
-    justifyContent: 'center',
-  },
-  buttonBarPad: {
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 86,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  barBtn: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    minWidth: 50,
-    alignItems: 'center',
-  },
-  barBtnText: { fontWeight: '700' },
+  buttonBarPhone: { left: 0, top: 0, bottom: 0, width: 86, justifyContent: 'center' },
+  buttonBarPad: { left: 0, right: 0, bottom: 0, height: 86, flexDirection: 'row', alignItems: 'center' },
+  barBtn: { backgroundColor: '#fff', paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8, minWidth: 50, alignItems: 'center' },
+  barBtnText: { fontWeight: '600' },
   trashZone: {
     position: 'absolute',
-    backgroundColor: 'rgba(170, 35, 35, 0.76)',
+    backgroundColor: 'rgba(180,20,20,0.7)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   trashText: { color: '#fff', fontWeight: '700' },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalCard: {
-    width: '88%',
-    maxHeight: '80%',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    gap: 8,
-  },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center' },
+  modalCard: { width: '88%', maxHeight: '80%', backgroundColor: '#fff', borderRadius: 12, padding: 12, gap: 8 },
   modalTitle: { fontSize: 18, fontWeight: '700' },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomColor: '#ddd',
-    borderBottomWidth: 1,
-    paddingVertical: 8,
-  },
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#ddd', paddingVertical: 8 },
   rowRight: { flexDirection: 'row', gap: 8 },
-  rowBtn: { backgroundColor: '#eee', borderRadius: 8, paddingVertical: 4, paddingHorizontal: 10 },
+  rowBtn: { backgroundColor: '#eee', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
   closeBtn: { backgroundColor: '#eee', borderRadius: 8, padding: 10, alignItems: 'center' },
 });
