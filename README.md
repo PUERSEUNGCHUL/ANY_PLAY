@@ -17,3 +17,13 @@ npm run start
 - NORMAL/DRAGGING 모드 전환 + 드래그 중 휴지통 드롭 삭제
 - 로컬 저장/복원(AsyncStorage)
 - Help + 보상형 힌트(일 3회 카운트 로직)
+
+## GitHub Actions로 Release APK 빌드/다운로드
+1. GitHub 저장소의 **Actions** 탭으로 이동합니다.
+2. **Build Android APK** 워크플로를 선택한 뒤 원하는 run을 엽니다.
+3. run 페이지의 **Artifacts** 섹션에서 `app-release-apk`를 다운로드합니다.
+
+### Release APK 산출 경로
+- 워크플로 내부 Gradle 산출물 경로: `android/app/build/outputs/apk/release/*.apk`
+- 업로드되는 Artifact 이름: `app-release-apk`
+
