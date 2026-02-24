@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Genesis",
+    "slug": "genesis-rn-prototype",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#d7f2ff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.genesis.prototype",
+      "versionCode": 1
+    },
+    "plugins": [],
+    "extra": {
+      "eas": {
+        "projectId": "local-prototype"
+      }
+    }
+  }
+}
