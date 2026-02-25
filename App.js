@@ -53,6 +53,8 @@ const sortCombo = (a, b) => [a, b].sort().join('+');
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+const defaultAdHint = () => ({ date: today(), used: 0, limit: 3 });
+
 function parseAspect(width, height) {
   const portrait = height >= width;
   return portrait && width < 700 ? 'phone' : 'pad';
@@ -68,7 +70,7 @@ export default function App() {
   const [draggingId, setDraggingId] = useState(null);
   const [showCompendium, setShowCompendium] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const [adHint, setAdHint] = useState({ date: today(), used: 0, limit: 3 });
+  const [adHint, setAdHint] = useState(defaultAdHint());
 
   const lastTouchRef = useRef(null);
   const dragStartPos = useRef({ x: 0, y: 0 });
@@ -87,42 +89,52 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-      setDiscoveredByCombine(saved.collection?.discoveredByCombine ?? []);
-      setFavorites(saved.collection?.favorites?.slice(0, 10) ?? []);
-      setLastTap(saved.ui?.lastWorkspaceTapPoint ?? null);
-      const ad = saved.adHint ?? { date: today(), used: 0, limit: 3 };
-      setAdHint(ad.date === today() ? ad : { date: today(), used: 0, limit: 3 });
-      const loaded = (saved.canvas?.instances ?? []).map((it) => ({
-        ...it,
-        x: it.xNorm * layout.width,
-        y: it.yNorm * layout.height,
-      }));
-      setInstances(loaded);
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        setDiscoveredByCombine(saved.collection?.discoveredByCombine ?? []);
+        setFavorites(saved.collection?.favorites?.slice(0, 10) ?? []);
+        setLastTap(saved.ui?.lastWorkspaceTapPoint ?? null);
+        const ad = saved.adHint ?? defaultAdHint();
+        setAdHint(ad.date === today() ? ad : defaultAdHint());
+        const loaded = (saved.canvas?.instances ?? []).map((it) => ({
+          ...it,
+          x: Number(it.xNorm) * layout.width,
+          y: Number(it.yNorm) * layout.height,
+        }));
+        setInstances(loaded.filter((it) => Number.isFinite(it.x) && Number.isFinite(it.y)));
+      } catch (err) {
+        console.error('[boot] failed to restore saved state', err);
+        await AsyncStorage.removeItem(STORAGE_KEY);
+      }
     })();
   }, [layout.width, layout.height]);
 
   useEffect(() => {
     const handle = setTimeout(async () => {
-      const payload = {
-        canvas: {
-          instances: instances.map((it) => ({
-            instanceId: it.instanceId,
-            definitionId: it.definitionId,
-            xNorm: it.x / layout.width,
-            yNorm: it.y / layout.height,
-          })),
-        },
-        collection: {
-          discoveredByCombine,
-          favorites,
-        },
-        ui: { lastWorkspaceTapPoint: lastTap },
-        adHint,
-      };
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      if (!layout.width || !layout.height) return;
+      try {
+        const payload = {
+          canvas: {
+            instances: instances.map((it) => ({
+              instanceId: it.instanceId,
+              definitionId: it.definitionId,
+              xNorm: it.x / layout.width,
+              yNorm: it.y / layout.height,
+            })),
+          },
+          collection: {
+            discoveredByCombine,
+            favorites,
+          },
+          ui: { lastWorkspaceTapPoint: lastTap },
+          adHint,
+        };
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      } catch (err) {
+        console.error('[boot] failed to persist state', err);
+      }
     }, 450);
     return () => clearTimeout(handle);
   }, [instances, discoveredByCombine, favorites, lastTap, adHint, layout.width, layout.height]);
@@ -279,7 +291,7 @@ export default function App() {
   }, [discoveredByCombine]);
 
   const useRewardedHint = () => {
-    const normalized = adHint.date === today() ? adHint : { date: today(), used: 0, limit: 3 };
+    const normalized = adHint.date === today() ? adHint : defaultAdHint();
     if (normalized.used >= normalized.limit) {
       Alert.alert('힌트 제한', '오늘은 힌트를 모두 사용했어요.');
       setAdHint(normalized);
