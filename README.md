@@ -54,6 +54,41 @@ unzip -l app/build/outputs/apk/release/app-release.apk | rg "assets/index.androi
 - 산출물: `android/app/build/outputs/apk/release/app-release.apk`
 - 참고: 일반적으로 `assembleRelease` 실행 시 Gradle task(`bundleReleaseJsAndAssets`)가 JS 번들을 APK에 포함합니다.
 
+
+## PERMISSION DENIED 트러블슈팅
+
+이 프로토타입은 **로그인 기능이 없습니다**. `App.js` 기준으로 인증/로그인 라우트가 없고, 로컬 저장(AsyncStorage)만 사용합니다.
+
+`PERMISSION DENIED` 로그가 보일 때는 보통 아래 2가지로 분류됩니다.
+
+1. **시스템/서드파티 프로세스 로그**: 앱 동작과 직접 관계 없는 메시지
+2. **우리 앱 프로세스 로그**: 실제 크래시/오동작 원인 후보
+
+### 로그 수집(전체 + 앱 내부 크래시 로그)
+
+```bash
+# 디바이스 연결 후
+./scripts/collect-android-logs.sh com.genesis.prototype
+```
+
+생성 파일:
+- `artifacts/android-logs/logcat_*.txt`
+- `artifacts/android-logs/crash_logs_*.txt`
+- `artifacts/android-logs/app_files_*.txt`
+
+### 빠른 확인 포인트
+
+```bash
+# 우리 앱 프로세스 관련 로그만 1차 필터
+rg -n "com\.genesis\.prototype|FATAL EXCEPTION|Permission denied|E AndroidRuntime" artifacts/android-logs/logcat_*.txt
+
+# CrashLogger가 남긴 내부 크래시 로그 확인
+sed -n '1,220p' artifacts/android-logs/crash_logs_*.txt
+```
+
+> 참고: 이 앱의 CrashLogger는 내부 저장소(`context.filesDir/logs`)에 로그를 기록하므로,
+> **외부 저장소 권한이 없어도 동작**합니다.
+
 ## Android Crash Logging
 
 A global crash logger is installed in `MainApplication` using `Thread.setDefaultUncaughtExceptionHandler`.
