@@ -7,7 +7,10 @@ npm install
 echo "[2/3] Generating android project"
 npx expo prebuild --platform android --non-interactive
 
-echo "[3/3] Building debug APK"
-(cd android && ./gradlew assembleDebug)
+echo "[3/3] Building standalone release APK (no Metro required)"
+(cd android && ./gradlew clean assembleRelease)
 
-echo "APK: android/app/build/outputs/apk/debug/app-debug.apk"
+echo "APK: android/app/build/outputs/apk/release/app-release.apk"
+
+echo "Verifying JS bundle is packaged in APK"
+unzip -l android/app/build/outputs/apk/release/app-release.apk | rg "assets/index.android.bundle"
