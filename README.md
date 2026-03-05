@@ -53,3 +53,19 @@ unzip -l app/build/outputs/apk/release/app-release.apk | rg "assets/index.androi
 
 - 산출물: `android/app/build/outputs/apk/release/app-release.apk`
 - 참고: 일반적으로 `assembleRelease` 실행 시 Gradle task(`bundleReleaseJsAndAssets`)가 JS 번들을 APK에 포함합니다.
+
+## Android Crash Logging
+
+A global crash logger is installed in `MainApplication` using `Thread.setDefaultUncaughtExceptionHandler`.
+
+- Handler class: `android/app/src/main/java/com/genesis/prototype/CrashLogger.kt`
+- Registration: `android/app/src/main/java/com/genesis/prototype/MainApplication.kt`
+- Manifest entry: `android/app/src/main/AndroidManifest.xml` (`android:name=".MainApplication"`)
+
+Crash logs are written automatically to:
+
+- Directory: `context.filesDir/logs`
+- Filename pattern: `crash_yyyyMMdd_HHmmss.txt`
+- Contents: timestamp, thread info, device/build info, app version, and full stack trace.
+
+No external storage permission is required because logs are written to internal app storage.
