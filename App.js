@@ -60,7 +60,19 @@ function parseAspect(width, height) {
   return portrait && width < 700 ? 'phone' : 'pad';
 }
 
+function formatErrorMessage(error) {
+  if (!error) return '알 수 없는 오류가 발생했습니다.';
+  if (typeof error === 'string') return error;
+  return error.message || '알 수 없는 오류가 발생했습니다.';
+}
+
+function formatErrorStack(error) {
+  if (!error?.stack) return '';
+  return String(error.stack).split('\n').slice(0, 6).join('\n');
+}
+
 export default function App() {
+  const [runtimeError, setRuntimeError] = useState(null);
   const [layout, setLayout] = useState(Dimensions.get('window'));
   const [instances, setInstances] = useState([]);
   const [discoveredByCombine, setDiscoveredByCombine] = useState([]);
@@ -81,6 +93,34 @@ export default function App() {
     () => Math.max(deviceType === 'phone' ? 56 : 72, ELEMENT_RADIUS * (deviceType === 'phone' ? 2.4 : 2.8)),
     [deviceType]
   );
+
+  const reportError = (error, context = 'unknown') => {
+    const message = formatErrorMessage(error);
+    const stack = formatErrorStack(error);
+    const next = {
+      context,
+      message,
+      stack,
+      time: new Date().toISOString(),
+    };
+    console.error(`[runtime:${context}]`, error);
+    setRuntimeError(next);
+    Alert.alert('오류 발생', `${context}에서 오류가 발생했어요.\n${message}`);
+  };
+
+  useEffect(() => {
+    if (!global.ErrorUtils?.getGlobalHandler || !global.ErrorUtils?.setGlobalHandler) return undefined;
+
+    const previousHandler = global.ErrorUtils.getGlobalHandler();
+    global.ErrorUtils.setGlobalHandler((error, isFatal) => {
+      reportError(error, isFatal ? 'fatal' : 'global');
+      // 기본 핸들러를 그대로 호출하면 앱이 종료될 수 있어 사용자에게 먼저 오류를 보여줍니다.
+    });
+
+    return () => {
+      global.ErrorUtils.setGlobalHandler(previousHandler);
+    };
+  }, []);
 
   useEffect(() => {
     const sub = Dimensions.addEventListener('change', ({ window }) => setLayout(window));
@@ -105,7 +145,7 @@ export default function App() {
         }));
         setInstances(loaded.filter((it) => Number.isFinite(it.x) && Number.isFinite(it.y)));
       } catch (err) {
-        console.error('[boot] failed to restore saved state', err);
+        reportError(err, 'state-restore');
         await AsyncStorage.removeItem(STORAGE_KEY);
       }
     })();
@@ -133,7 +173,7 @@ export default function App() {
         };
         await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
       } catch (err) {
-        console.error('[boot] failed to persist state', err);
+        reportError(err, 'state-persist');
       }
     }, 450);
     return () => clearTimeout(handle);
@@ -434,6 +474,21 @@ export default function App() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={!!runtimeError} animationType="fade" transparent>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>오류 리포트</Text>
+            <Text>{`시점: ${runtimeError?.time ?? '-'}`}</Text>
+            <Text>{`위치: ${runtimeError?.context ?? '-'}`}</Text>
+            <Text>{`메시지: ${runtimeError?.message ?? '-'}`}</Text>
+            {runtimeError?.stack ? <Text style={styles.stackText}>{runtimeError.stack}</Text> : null}
+            <Pressable style={styles.closeBtn} onPress={() => setRuntimeError(null)}>
+              <Text>닫기</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -478,4 +533,5 @@ const styles = StyleSheet.create({
   rowRight: { flexDirection: 'row', gap: 8 },
   rowBtn: { backgroundColor: '#eee', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
   closeBtn: { backgroundColor: '#eee', borderRadius: 8, padding: 10, alignItems: 'center' },
+  stackText: { fontSize: 11, color: '#444' },
 });
