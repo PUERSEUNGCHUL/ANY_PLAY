@@ -81,6 +81,7 @@ export default function App() {
   const [mode, setMode] = useState('NORMAL');
   const [draggingId, setDraggingId] = useState(null);
   const [showCompendium, setShowCompendium] = useState(false);
+  const [showInventory, setShowInventory] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [adHint, setAdHint] = useState(defaultAdHint());
 
@@ -323,6 +324,11 @@ export default function App() {
     if (!ok) Alert.alert('실패', instances.length >= maxElements ? '캔버스가 가득 찼어요' : '놓을 공간이 없어요');
   };
 
+  const spawnFromInventory = (defId) => {
+    const ok = spawnOne(defId, { x: layout.width / 2, y: layout.height / 2 });
+    if (!ok) Alert.alert('실패', instances.length >= maxElements ? '캔버스가 가득 찼어요' : '놓을 공간이 없어요');
+  };
+
   const hintCandidates = useMemo(() => {
     const discovered = new Set([...ELEMENT_DEFS.filter((d) => d.discoveredByDefault).map((d) => d.id), ...discoveredByCombine]);
     return Object.entries(RECIPES)
@@ -419,6 +425,9 @@ export default function App() {
           <Pressable style={styles.barBtn} onPress={() => setShowCompendium(true)}>
             <Text style={styles.barBtnText}>도감</Text>
           </Pressable>
+          <Pressable style={styles.barBtn} onPress={() => setShowInventory(true)}>
+            <Text style={styles.barBtnText}>인벤토리</Text>
+          </Pressable>
           {quickSlots.map((defId, idx) => (
             <Pressable key={`q-${idx}`} style={styles.barBtn} onPress={() => defId && quickSpawn(defId)}>
               <Text style={styles.barBtnText}>{defId ? defById[defId].emoji : '+'}</Text>
@@ -456,6 +465,30 @@ export default function App() {
               </View>
             ))}
             <Pressable style={styles.closeBtn} onPress={() => setShowCompendium(false)}><Text>닫기</Text></Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={showInventory} animationType="slide" transparent>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>인벤토리</Text>
+            {compendiumList.map((d) => (
+              <Pressable
+                key={`inv-${d.id}`}
+                style={styles.row}
+                onPress={() => {
+                  setShowInventory(false);
+                  spawnFromInventory(d.id);
+                }}
+              >
+                <Text>{`${d.id} ${d.emoji} ${d.name}`}</Text>
+                <Text>배치</Text>
+              </Pressable>
+            ))}
+            <Pressable style={styles.closeBtn} onPress={() => setShowInventory(false)}>
+              <Text>닫기</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
